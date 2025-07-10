@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2025 STMicroelectronics.
+  * Copyright (c) 2023 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -19,12 +19,13 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "dma.h"
+#include "spi.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h> // Necessário para printf
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,20 +46,94 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-static GPIO_PinState prevButtonState = GPIO_PIN_SET; // Assume botão solto inicialmente (pull-up)
- uint8_t rx_data;
+// Variáveis globais/estáticas para o seu programa
+uint32_t adc_raw_value; // Variável para armazenar o valor lido do ADC SPI
+char msg[100];          // Buffer para a mensagem a ser enviada pela serial
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MPU_Config(void);
 /* USER CODE BEGIN PFP */
-
+// Protótipos das funções que você implementará para o seu ADC SPI
+void ADC_SPI_Init(void);
+uint32_t ADC_SPI_ReadValue(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/**
+  * @brief  Função de inicialização do ADC SPI externo.
+  * Esta função deve ser adaptada de acordo com o datasheet do seu ADC.
+  * @param  None
+  * @retval None
+  */
+void ADC_SPI_Init(void)
+{
+    // --- EXEMPLO GENÉRICO: ADAPTE PARA O SEU ADC SPI ESPECÍFICO ---
+    // Alguns ADCs SPI precisam de comandos de inicialização, configuração de registradores,
+    // ou calibração. Use a comunicação SPI aqui para enviar esses comandos.
+    // Lembre-se de controlar o pino CS (Chip Select) do seu ADC.
 
+    // Exemplo de sequência (substitua pelos comandos reais do seu ADC!):
+    // Desativa o CS (Chip Select) antes de começar (geralmente alto por padrão)
+    HAL_GPIO_WritePin(ADC_CS_GPIO_Port, ADC_CS_Pin, GPIO_PIN_SET);
+    HAL_Delay(10); // Pequeno atraso
+
+    // Ativa CS (nível baixo)
+    HAL_GPIO_WritePin(ADC_CS_GPIO_Port, ADC_CS_Pin, GPIO_PIN_RESET);
+    // Enviar comando de reset ou configuração (ex: para ADS1256, AD7124, etc.)
+    // uint8_t reset_cmd = 0x06; // Exemplo de um comando de reset
+    // HAL_SPI_Transmit(&hspi1, &reset_cmd, 1, HAL_MAX_DELAY);
+    // Desativa CS
+    HAL_GPIO_WritePin(ADC_CS_GPIO_Port, ADC_CS_Pin, GPIO_PIN_SET);
+    HAL_Delay(100); // Atraso após inicialização
+
+    // Você pode precisar de mais comandos aqui para configurar ganho, taxa de amostragem, etc.
+    // Consulte o datasheet do seu ADC!
+}
+
+/**
+  * @brief  Função para ler um valor do ADC SPI externo.
+  * Esta função deve ser adaptada de acordo com o datasheet do seu ADC.
+  * @param  None
+  * @retval Valor lido do ADC (uint32_t para acomodar até 32 bits).
+  */
+uint32_t ADC_SPI_ReadValue(void)
+{
+    // --- EXEMPLO GENÉRICO: ADAPTE PARA O SEU ADC SPI ESPECÍFICO ---
+    uint8_t tx_dummy_byte = 0x00; // Byte dummy para iniciar a comunicação se necessário
+    uint8_t rx_data[4];           // Buffer para receber dados (até 4 bytes para 32-bit ADC)
+    uint32_t value = 0;
+
+    // 1. Ativar o Chip Select (CS) - Nível baixo
+    HAL_GPIO_WritePin(ADC_CS_GPIO_Port, ADC_CS_Pin, GPIO_PIN_RESET);
+
+    // 2. Enviar o comando de leitura ou registro (se o seu ADC precisar)
+    // Muitos ADCs SPI precisam de um comando para iniciar a leitura ou selecionar um canal.
+    // Por exemplo, para um ADS1256, você enviaria um comando RDATA.
+    // uint8_t read_command = 0x11; // Exemplo: Comando para ler dados de um registro
+    // HAL_SPI_Transmit(&hspi1, &read_command, 1, HAL_MAX_DELAY);
+
+    // 3. Receber os dados do ADC
+    // Adapte o número de bytes a serem recebidos (ex: 3 para 24-bit, 2 para 16-bit).
+    // Dependendo do seu ADC, você pode precisar de HAL_SPI_Receive ou HAL_SPI_TransmitReceive.
+    // HAL_SPI_Receive(&hspi1, rx_data, 3, HAL_MAX_DELAY); // Exemplo para 3 bytes (24-bit ADC)
+    // Ou, se o ADC precisa que você envie "dummy bytes" para clockar os dados:
+    HAL_SPI_TransmitReceive(&hspi1, &tx_dummy_byte, rx_data, 3, HAL_MAX_DELAY); // 3 bytes de dados
+
+    // 4. Desativar o Chip Select (CS) - Nível alto
+    HAL_GPIO_WritePin(ADC_CS_GPIO_Port, ADC_CS_Pin, GPIO_PIN_SET);
+
+    // 5. Reconstruir o valor lido a partir dos bytes recebidos
+    // ESTA PARTE É CRÍTICA E DEPENDE DA ORDEM DE BYTES DO SEU ADC (MSB primeiro, LSB primeiro)
+    // Exemplo para um ADC de 24 bits que envia MSB primeiro (Byte0, Byte1, Byte2):
+    value = ( (uint32_t)rx_data[0] << 16 ) | ( (uint32_t)rx_data[1] << 8 ) | ( (uint32_t)rx_data[2] );
+    // Se for 16 bits:
+    // value = ( (uint32_t)rx_data[0] << 8 ) | rx_data[1];
+
+    return value;
+}
 /* USER CODE END 0 */
 
 /**
@@ -95,7 +170,16 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_USART3_UART_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
+
+  // Chame a função de inicialização do seu ADC SPI externo (se necessário)
+  // Esta função pode enviar comandos de configuração para o ADC
+  ADC_SPI_Init();
+
+  // Teste inicial da comunicação serial
+  printf(msg, sizeof(msg), "Iniciando leitura ADC SPI...\r\n");
+  HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
 
   /* USER CODE END 2 */
 
@@ -103,27 +187,21 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    // 1. Leia o valor bruto do ADC SPI
+    adc_raw_value = ADC_SPI_ReadValue();
+
+    // 2. Converta o valor lido para uma string para envio serial
+    // Use %lu para unsigned long int (adequado para uint32_t)
+    printf(msg, sizeof(msg), "Valor ADC SPI: %lu\r\n", adc_raw_value);
+
+    // 3. Envie a string pelo terminal serial
+    HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+
+    // 4. Pequeno atraso para não sobrecarregar o terminal serial e permitir estabilização
+    HAL_Delay(500); // Atraso de 500ms entre as leituras
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  // Lógica para o botão PC13 (BUTTON_B1)
-	    GPIO_PinState currentButtonState = HAL_GPIO_ReadPin(btn_GPIO_Port, btn_Pin);
-
-	    // Verifica se o botão foi pressionado (transição de HIGH para LOW)
-	    // e se o estado anterior era solto para evitar múltiplos prints enquanto pressionado
-	    if (currentButtonState == GPIO_PIN_RESET && prevButtonState == GPIO_PIN_SET) {
-	        // Botão foi pressionado
-	        HAL_UART_Transmit(&huart3, (uint8_t*)"Hello World!\r\n", 14, HAL_MAX_DELAY);
-	        HAL_Delay(100); // Pequeno atraso para "debounce" simples
-	    }
-
-	    // Atualiza o estado anterior do botão
-	    prevButtonState = currentButtonState;
-
-	    // Adicione um pequeno atraso para não sobrecarregar o processador
-	    // Pode ser ajustado ou removido se sua aplicação precisar de máxima reatividade
-	    HAL_Delay(10);
-
   }
   /* USER CODE END 3 */
 }
@@ -153,7 +231,16 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 10;
+  RCC_OscInitStruct.PLL.PLLP = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLR = 2;
+  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
+  RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOMEDIUM;
+  RCC_OscInitStruct.PLL.PLLFRACN = 0;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
